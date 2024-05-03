@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import math
 from math import pi
 from random import choice, uniform
@@ -7,26 +9,6 @@ import numpy as np
 from panda_gym.envs.core import RobotTaskEnv, Task
 from panda_gym.envs.robots.panda import Panda
 from panda_gym.pybullet import PyBullet
-
-
-class Cube:
-    """
-    Cube tracks the lifecycle of a target object (not a goal)
-    """
-
-    def __init__(
-        self,
-        id: str,
-        name: str,
-        position: np.array,
-        size: float,
-        color: Tuple[int, int, int] = (255, 255, 255),
-    ):
-        self.id = id
-        self.name = name
-        self.position = position
-        self.size = 0.25
-        self.color = color
 
 
 class SortTask(Task):
@@ -87,7 +69,7 @@ class SortTask(Task):
         z = 0.01
         position = np.array([x, y, z])
 
-        size = 0.08
+        size = 0.04
 
         self.sim.create_box(
             body_name=name,
@@ -118,11 +100,12 @@ class SortTask(Task):
         self.reset_target_object()
         self.score = 0.0
 
-    def _get_obs(self) -> np.array:
+    def step(self) -> np.array:
         """
-        get_obs will determine if any objects collided and need to be removed,
-        and adjust the score as expected. It will then return an observation
-        object
+        step will determine if any objects collided and need to be removed,
+        and adjust the score as expected.
+
+        Returns an observation of the current state
         """
         if self.target:
             floor_id = self.sim._bodies_idx["plane"]
@@ -136,7 +119,7 @@ class SortTask(Task):
                 self.score += 1.0
                 self.finish = True
 
-        return self.get_observation()
+        return self.get_obs()
 
     def check_collision(self, object1: str, object2: str) -> bool:
         """
@@ -167,7 +150,7 @@ class SortTask(Task):
         )
         return observation.astype(np.float32)
 
-    def get_observation(self) -> np.array:
+    def get_obs(self) -> np.array:
         """
         Builds a state vector of the current state of the
         environment for the agent
@@ -182,9 +165,6 @@ class SortTask(Task):
         cube_state = self.get_cube_pose()
 
         return np.concatenate([robot_state, cube_state])
-
-    def set_action(self, action: np.ndarray) -> None:
-        pass
 
     def compute_reward(
         self,
@@ -204,9 +184,6 @@ class SortTask(Task):
 
     def get_achieved_goal(self) -> np.ndarray:
         return np.array(self.target is None and self.score != 0.0, dtype="bool")
-
-    def get_obs(self) -> np.ndarray:
-        return self.get_observation().astype(np.float32)
 
 
 class SortEnv(RobotTaskEnv):
@@ -270,7 +247,7 @@ class SortEnv(RobotTaskEnv):
         return observation, None
 
     def _get_obs(self) -> Dict[str, np.ndarray]:
-        observation = self.task._get_obs().astype(np.float32)
+        observation = self.task.step().astype(np.float32)
         achieved_goal = self.task.get_achieved_goal().astype(np.float32)
 
         return {
@@ -278,23 +255,19 @@ class SortEnv(RobotTaskEnv):
             "achieved_goal": achieved_goal,
         }
 
-    def get_obs(self) -> np.ndarray:
-        return self.task.get_obs().astype(np.float32)
-
-    def step(
-        self, action: np.ndarray
-    ) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
+    def step(self, action: Action) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
         """
         Take a step in the environment.
 
         Args:
-            action (np.ndarray): Action.
+            action (Action): Action being performed
 
         Returns:
             Tuple[np.ndarray, float, bool, Dict[str, Any]]: Observation, reward, done, info.
         """
         score_prior = self.task.score
-        self.robot.set_action(action)
+        print("Panda action:", action.to_panda_action())
+        self.robot.set_action(action.to_panda_action())
         self.sim.step()
 
         obs = self._get_obs()
@@ -304,3 +277,137 @@ class SortEnv(RobotTaskEnv):
         reward = score_after - score_prior
 
         return obs, reward, terminated, False, info
+
+
+class Action:
+    """
+    Action is a class handling the discretization of actions
+    for the robot arm
+    """
+
+    NORTH = 0
+    NORTHEAST = 1
+    EAST = 2
+    SOUTHEAST = 3
+    SOUTH = 4
+    SOUTHWEST = 5
+    WEST = 6
+    NORTHWEST = 7
+    UP = 8
+    DOWN = 9
+    OPEN_GRIPPER = 10
+    CLOSE_GRIPPER = 11
+
+    def __init__(self, action: int):
+        self.action = action
+
+    @classmethod
+    def Random(cls) -> Action:
+        return Action(choice(range(12)))
+
+    @classmethod
+    def FromOneHot(cls, action: np.ndarray) -> Action:
+        return Action(np.argmax(action))
+
+    def one_hot(self) -> np.ndarray:
+        action = np.zeros(8, dtype=np.float32)
+        action[self.action] = 1.0
+        return action
+
+    def to_panda_action(self) -> np.ndarray:
+        """
+        Converts our action to a panda "ee" controlled
+        robot action - a set of forces upon each
+        """
+        move = 0.5
+        gripper = 0.5
+
+        movement = np.zeros(4)
+        # movement = [NORTH, EAST, SOUTH, WEST, RAISE, GRIPPER]
+
+        if self.action == Action.NORTH:
+            # movement[1] = move
+            movement[0] = move
+        if self.action == Action.NORTHEAST:
+            movement[0] = move
+            movement[1] = move
+        if self.action == Action.EAST:
+            # movement[0] = move
+            movement[1] = move
+        if self.action == Action.SOUTHEAST:
+            movement[0] = move
+            movement[1] = -move
+        if self.action == Action.SOUTH:
+            # movement[1] = -move
+            movement[0] = -move
+        if self.action == Action.SOUTHWEST:
+            movement[0] = -move
+            movement[1] = -move
+        if self.action == Action.WEST:
+            # movement[0] = -move
+            movement[1] = -move
+        if self.action == Action.NORTHWEST:
+            # movement[0] = -move
+            # movement[1] = move
+            movement[0] = move
+            movement[1] = -move
+        if self.action == Action.UP:
+            movement[2] = move / 2
+        if self.action == Action.DOWN:
+            movement[2] = -move / 2
+        if self.action == Action.OPEN_GRIPPER:
+            movement[3] = gripper
+        if self.action == Action.CLOSE_GRIPPER:
+            movement[3] = -gripper
+
+        return movement
+
+    @classmethod
+    def GetString(cls, action: int) -> str:
+        if action == Action.NORTH:
+            return "NORTH"
+        if action == Action.NORTHEAST:
+            return "NORTHEAST"
+        if action == Action.EAST:
+            return "EAST"
+        if action == Action.SOUTHEAST:
+            return "SOUTHEAST"
+        if action == Action.SOUTH:
+            return "SOUTH"
+        if action == Action.SOUTHWEST:
+            return "SOUTHWEST"
+        if action == Action.WEST:
+            return "WEST"
+        if action == Action.NORTHWEST:
+            return "NORTHWEST"
+        if action == Action.UP:
+            return "UP"
+        if action == Action.DOWN:
+            return "DOWN"
+        if action == Action.OPEN_GRIPPER:
+            return "OPEN_GRIPPER"
+        if action == Action.CLOSE_GRIPPER:
+            return "CLOSE_GRIPPER"
+
+    def __str__(self):
+        return f"{Action.GetString(self.action)}"
+
+
+class Cube:
+    """
+    Cube tracks the lifecycle of a target object (not a goal)
+    """
+
+    def __init__(
+        self,
+        id: str,
+        name: str,
+        position: np.array,
+        size: float,
+        color: Tuple[int, int, int] = (255, 255, 255),
+    ):
+        self.id = id
+        self.name = name
+        self.position = position
+        self.size = size
+        self.color = color
