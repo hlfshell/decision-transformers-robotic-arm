@@ -139,7 +139,7 @@ class SortTask(Task):
         Get the pose of the cube
         """
         if self.target == None:
-            return np.zeros(10, dtype=np.float32)
+            return np.zeros(12, dtype=np.float32)
 
         object_position = self.sim.get_base_position(self.target.name)
         object_rotation = self.sim.get_base_rotation(self.target.name)
@@ -310,7 +310,6 @@ class SortEnv(RobotTaskEnv):
         self.sim.step()
 
         obs = self._get_obs()
-        print(">>", obs)
         score_after = self.task.score
         terminated = self.task.is_success(obs["achieved_goal"], self.task.get_goal())
         info = {"is_success": terminated}
@@ -350,7 +349,7 @@ class Action:
         return Action(np.argmax(action))
 
     def one_hot(self) -> np.ndarray:
-        action = np.zeros(8, dtype=np.float32)
+        action = np.zeros(12, dtype=np.float32)
         action[self.action] = 1.0
         return action
 
