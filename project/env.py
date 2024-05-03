@@ -23,12 +23,13 @@ class SortTask(Task):
         self.sim.create_plane(z_offset=-0.4)
 
         # Set up our goal
+        self.__goal_position = np.array([-0.25, 0.00, 0.01])
         self.sim.create_box(
             body_name="goal",
             half_extents=[0.05, 0.1, 0.01],
             mass=0.0,
             ghost=False,
-            position=np.array([-0.25, 0.00, 0.01]),
+            position=self.__goal_position,
             rgba_color=[0.0, 1.0, 0.0, 0.4],
         )
 
@@ -41,6 +42,10 @@ class SortTask(Task):
             position=np.array([-0.2, 0.0, 0.01]),
             rgba_color=[0.0, 0.0, 0.0, 0.8],
         )
+
+        # region_limits are the corners that we'll use for coordinates to
+        # normalize positions by
+        self.region_limits = [(-0.4, 0.4), (-0.4, 0.4), (0.01, 0.2)]
 
         # Track our target id
         self.target: Optional[Cube] = None
@@ -155,16 +160,51 @@ class SortTask(Task):
         Builds a state vector of the current state of the
         environment for the agent
         """
+        observation = np.zeros(18, dtype=np.float32)
+
         # Robot state is in order:
         # end effector position (3)
         # end effector velocity (3)
         # fingers width (1)
         robot_state = self.robot.get_obs().astype(np.float32)
 
-        # Get the cube state
+        # Convert our robot EE position into a normalized coordinate
+        # with our region limits
+        for i in range(3):
+            coordinate = (robot_state[i] - self.region_limits[i][0]) / (
+                self.region_limits[i][1] - self.region_limits[i][0]
+            )
+            if coordinate < 0:
+                coordinate = 0
+            if coordinate > 1:
+                coordinate = 1
+            observation[i] = coordinate
+
+        observation[3:7] = robot_state[3:7]
+
+        # Get the cube state;
+        # cube position (3)
+        # cube orientation (3)
+        # cube velocity (3)
+        # cube angular velocity (3)
         cube_state = self.get_cube_pose()
 
-        return np.concatenate([robot_state, cube_state])
+        # Convert our cube position into a normalized coordinate
+        # with our region limits
+        for i in range(3):
+            coordinate = (cube_state[i] - self.region_limits[i][0]) / (
+                self.region_limits[i][1] - self.region_limits[i][0]
+            )
+            if coordinate < 0:
+                coordinate = 0
+            if coordinate > 1:
+                coordinate = 1
+            observation[i + 7] = coordinate
+
+        observation[9:18] = cube_state[3:12]
+
+        # return np.concatenate([robot_state, cube_state])
+        return observation
 
     def compute_reward(
         self,
@@ -266,11 +306,11 @@ class SortEnv(RobotTaskEnv):
             Tuple[np.ndarray, float, bool, Dict[str, Any]]: Observation, reward, done, info.
         """
         score_prior = self.task.score
-        print("Panda action:", action.to_panda_action())
         self.robot.set_action(action.to_panda_action())
         self.sim.step()
 
         obs = self._get_obs()
+        print(">>", obs)
         score_after = self.task.score
         terminated = self.task.is_success(obs["achieved_goal"], self.task.get_goal())
         info = {"is_success": terminated}
@@ -323,32 +363,29 @@ class Action:
         gripper = 0.5
 
         movement = np.zeros(4)
+        # Note that the movements below are relative to the
+        # application directions, and not the actual end effector
+        # x y z frame
         # movement = [NORTH, EAST, SOUTH, WEST, RAISE, GRIPPER]
 
         if self.action == Action.NORTH:
-            # movement[1] = move
             movement[0] = move
         if self.action == Action.NORTHEAST:
             movement[0] = move
             movement[1] = move
         if self.action == Action.EAST:
-            # movement[0] = move
             movement[1] = move
         if self.action == Action.SOUTHEAST:
             movement[0] = move
             movement[1] = -move
         if self.action == Action.SOUTH:
-            # movement[1] = -move
             movement[0] = -move
         if self.action == Action.SOUTHWEST:
             movement[0] = -move
             movement[1] = -move
         if self.action == Action.WEST:
-            # movement[0] = -move
             movement[1] = -move
         if self.action == Action.NORTHWEST:
-            # movement[0] = -move
-            # movement[1] = move
             movement[0] = move
             movement[1] = -move
         if self.action == Action.UP:
