@@ -74,12 +74,12 @@ class SortTask(Task):
         z = 0.01
         position = np.array([x, y, z])
 
-        size = 0.04
+        size = 0.03
 
         self.sim.create_box(
             body_name=name,
             half_extents=np.array([size / 2, size / 2, size / 2]),
-            mass=0.5,
+            mass=0.25,
             ghost=False,
             position=position,
             rgba_color=np.array([0.984, 0.494, 0.945, 0.8]),
@@ -271,6 +271,11 @@ class SortEnv(RobotTaskEnv):
         self.sim.place_visualizer(
             target_position=np.zeros(3), distance=0.9, yaw=45, pitch=-30
         )
+
+        # Gripper closed maintained so we have constant force on
+        # the gripper
+        self.__gripper_closed = False
+
         self.reset()
 
     def reset(self) -> Tuple[np.array, Dict[str, Any]]:
@@ -280,6 +285,8 @@ class SortEnv(RobotTaskEnv):
         Returns:
             Tuple[np.array, Dict[str, Any]]: Observation and info.
         """
+        self.__gripper_closed = False
+
         with self.sim.no_rendering():
             self.robot.reset()
             self.task.reset()
@@ -306,7 +313,20 @@ class SortEnv(RobotTaskEnv):
             Tuple[np.ndarray, float, bool, Dict[str, Any]]: Observation, reward, done, info.
         """
         score_prior = self.task.score
-        self.robot.set_action(action.to_panda_action())
+
+        # Track the gripper state
+        if action.is_a(Action.OPEN_GRIPPER):
+            self.__gripper_closed = False
+        elif action.is_a(Action.CLOSE_GRIPPER):
+            self.__gripper_closed = True
+
+        action_output = action.to_panda_action()
+
+        # Apply the gripper force if we are in "closed" state
+        if self.__gripper_closed:
+            action_output[3] = -0.5
+
+        self.robot.set_action(action_output)
         self.sim.step()
 
         obs = self._get_obs()
@@ -397,6 +417,9 @@ class Action:
             movement[3] = -gripper
 
         return movement
+
+    def is_a(self, action: int) -> bool:
+        return self.action == action
 
     @classmethod
     def GetString(cls, action: int) -> str:
