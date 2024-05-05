@@ -18,8 +18,6 @@ class Recorder:
 
     def __init__(self, target_directory: str, save_images: bool = False, fps: int = 24):
         self.__target_directory = target_directory
-        # Ensure the target directory exists
-        os.makedirs(self.__target_directory, exist_ok=True)
 
         self.__observations: List[np.ndarray] = []
         self.__actions: List[np.ndarray] = []
@@ -56,6 +54,11 @@ class Recorder:
         """
         Saves the recorded data to disk
         """
+        # Ensure the target directories exist
+        os.makedirs(self.__target_directory, exist_ok=True)
+        if self.__save_images:
+            os.makedirs(self.__image_directory, exist_ok=True)
+
         with open(os.path.join(self.__target_directory, "observations.pkl"), "wb") as f:
             dump(self.__observations, f)
 
