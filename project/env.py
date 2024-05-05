@@ -131,14 +131,6 @@ class SortTask(Task):
             < under_center
         )
 
-        # Determine if the x/y of the cube's center is within 0.05m of the goal's center
-        # over_goal = (
-        #     sqrt(
-        #         (cube_position[0] - self.__goal_position[0]) ** 2
-        #         + (cube_position[1] - self.__goal_position[1]) ** 2
-        #     )
-        #     < under_center * 2
-        # )
         # Given self.__goal_dimensions, determine if the cube x/y is within the goal
         over_goal = (
             cube_position[0] > self.__goal_position[0] - self.__goal_dimensions[0]
@@ -146,7 +138,6 @@ class SortTask(Task):
             and cube_position[1] > self.__goal_position[1] - self.__goal_dimensions[1]
             and cube_position[1] < self.__goal_position[1] + self.__goal_dimensions[1]
         )
-        print(under_ee, over_goal)
 
         # If it's under neither, return to the default color
         if not under_ee and not over_goal:
