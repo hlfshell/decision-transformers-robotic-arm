@@ -26,7 +26,6 @@ class Recorder:
         if self.__save_images:
             self.__images: List[np.ndarray] = []
             self.__image_directory = os.path.join(self.__target_directory, "images")
-            os.makedirs(self.__image_directory, exist_ok=True)
 
         self.__fps = fps
 
