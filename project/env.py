@@ -10,12 +10,17 @@ from panda_gym.envs.core import RobotTaskEnv, Task
 from panda_gym.envs.robots.panda import Panda
 from panda_gym.pybullet import PyBullet
 
+from math import sqrt
+
+import pybullet as p
+
 
 class SortTask(Task):
     def __init__(
         self,
         sim: PyBullet,
         robot: Panda,
+        color_cheat: bool = False,
     ):
         super().__init__(sim)
         self.robot = robot
@@ -24,9 +29,10 @@ class SortTask(Task):
 
         # Set up our goal
         self.__goal_position = np.array([-0.25, 0.00, 0.01])
+        self.__goal_dimensions = [0.05, 0.1, 0.01]
         self.sim.create_box(
             body_name="goal",
-            half_extents=[0.05, 0.1, 0.01],
+            half_extents=self.__goal_dimensions,
             mass=0.0,
             ghost=False,
             position=self.__goal_position,
@@ -58,6 +64,12 @@ class SortTask(Task):
         self.object_limits = ((-0.06, 0.06), (-0.2, 0.2))
 
         self.score = 0.0
+
+        # Color cheat is changing the cube color based on its position relative
+        # to the EE and the goal to allow humans to have an easier time lining
+        # stuff up
+        self.color_cheat = color_cheat
+
         self.reset()
 
     def reset_target_object(self):
@@ -94,6 +106,60 @@ class SortTask(Task):
             size=size,
         )
         self.goal = {}
+
+    def color_cheat_cube(self) -> None:
+        """
+        __color_cheat_cube will, if called, determine if the cube is in line
+        with either the EE or goal and determine a new color for the cube
+        if so.
+        """
+
+        # Get the position of the cube
+        cube_position = self.sim.get_base_position(self.target.name)
+
+        # Get the EE position
+        ee_position = self.robot.get_ee_position()
+
+        under_center = 0.025
+
+        # Determine if the x/y of the cube's center is within 0.05m of the EE's center
+        under_ee = (
+            sqrt(
+                (cube_position[0] - ee_position[0]) ** 2
+                + (cube_position[1] - ee_position[1]) ** 2
+            )
+            < under_center
+        )
+
+        # Determine if the x/y of the cube's center is within 0.05m of the goal's center
+        # over_goal = (
+        #     sqrt(
+        #         (cube_position[0] - self.__goal_position[0]) ** 2
+        #         + (cube_position[1] - self.__goal_position[1]) ** 2
+        #     )
+        #     < under_center * 2
+        # )
+        # Given self.__goal_dimensions, determine if the cube x/y is within the goal
+        over_goal = (
+            cube_position[0] > self.__goal_position[0] - self.__goal_dimensions[0]
+            and cube_position[0] < self.__goal_position[0] + self.__goal_dimensions[0]
+            and cube_position[1] > self.__goal_position[1] - self.__goal_dimensions[1]
+            and cube_position[1] < self.__goal_position[1] + self.__goal_dimensions[1]
+        )
+        print(under_ee, over_goal)
+
+        # If it's under neither, return to the default color
+        if not under_ee and not over_goal:
+            # self.sim.set_color(self.target.id, [1.0, 0.0, 0.0, 0.8])
+            p.changeVisualShape(
+                self.target.id, -1, rgbaColor=[0.984, 0.494, 0.945, 0.8]
+            )
+        # Goal takes priority-  if it is in line with the goal, we set the color to blue
+        elif over_goal:
+            p.changeVisualShape(self.target.id, -1, rgbaColor=[0.0, 0.0, 1.0, 0.8])
+        elif under_ee:
+            # ...otherwise we're under the EE and we set the color to green
+            p.changeVisualShape(self.target.id, -1, rgbaColor=[0.0, 1.0, 0.0, 0.8])
 
     def delete_cube(self):
         if self.target:
@@ -244,6 +310,7 @@ class SortEnv(RobotTaskEnv):
         renderer: str = "OpenGL",
         render_width: int = 720,
         render_height: int = 480,
+        color_cheat: bool = False,
     ):
         sim = PyBullet(
             render_mode=render_mode,
@@ -256,7 +323,7 @@ class SortEnv(RobotTaskEnv):
             base_position=np.array([-0.6, 0.0, 0.0]),
             control_type="ee",
         )
-        self.task = SortTask(sim, robot)
+        self.task = SortTask(sim, robot, color_cheat=color_cheat)
         super().__init__(
             robot=robot,
             task=self.task,
@@ -328,6 +395,9 @@ class SortEnv(RobotTaskEnv):
 
         self.robot.set_action(action_output)
         self.sim.step()
+
+        if self.task.color_cheat:
+            self.task.color_cheat_cube()
 
         obs = self._get_obs()
         score_after = self.task.score

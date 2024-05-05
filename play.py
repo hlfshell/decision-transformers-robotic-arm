@@ -4,7 +4,7 @@ from project.recorder import Recorder
 
 from time import sleep
 
-env = SortEnv()
+env = SortEnv(color_cheat=True)
 # controller = KeyboardController()
 controller = GamePad()
 recorder = None
