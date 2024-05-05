@@ -16,7 +16,6 @@ class KeyboardController:
     def get_key(self) -> int:
         keys = p.getKeyboardEvents()
         for k, v in keys.items():
-            # print(k, v)
             if v == 3:
                 return k
 
@@ -229,31 +228,31 @@ class GamePad:
                 joystick_axis[0] > diagonal_trigger
                 and joystick_axis[1] > diagonal_trigger
             ):
-                x_axis = 1.0
+                x_axis = -1.0
                 y_axis = -1.0
             elif (
                 joystick_axis[0] < -diagonal_trigger
                 and joystick_axis[1] > diagonal_trigger
             ):
-                x_axis = -1.0
+                x_axis = 1.0
                 y_axis = -1.0
             elif (
                 joystick_axis[0] < -diagonal_trigger
                 and joystick_axis[1] < -diagonal_trigger
             ):
-                x_axis = -1.0
+                x_axis = 1.0
                 y_axis = 1.0
             elif (
                 joystick_axis[0] > diagonal_trigger
                 and joystick_axis[1] < -diagonal_trigger
             ):
-                x_axis = 1.0
+                x_axis = -1.0
                 y_axis = 1.0
             elif joystick_axis[0] > forward_trigger:
-                x_axis = 1.0
+                x_axis = -1.0
                 y_axis = 0.0
             elif joystick_axis[0] < -forward_trigger:
-                x_axis = -1.0
+                x_axis = 1.0
                 y_axis = 0.0
             elif joystick_axis[1] > 0.8:
                 x_axis = 0.0
