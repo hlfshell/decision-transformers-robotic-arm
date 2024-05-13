@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Tuple
+from abc import ABC, abstractmethod
+from pickle import load
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,62 +11,9 @@ import torch
 from panda_gym.envs.core import RobotTaskEnv
 from torch import Tensor
 from torch.nn import MSELoss
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from project.env import Action
-
-from pickle import dump, load
-
-from abc import ABC, abstractmethod
-
-
-class RobotDataset(Dataset):
-
-    def __init__(self, directory: str, transforms=None, gamma: float = 0.95):
-        self.__directory = directory
-        self.__transforms = transforms
-        self.__gamma = gamma
-
-        # Quickly load and scan through the episodes to load them
-        # into memory. We're working with a small enough dataset
-        # that we can do this all in memory.
-        self.__episodes = []
-        self.__steps: List[Tuple[np.ndarray, Action, float]] = []
-
-        self.__load_dataset()
-
-    def __load_dataset(self):
-        """
-        Load the dataset from the directory provided. The dataset
-        is derived from the dataset directory, wherein each episode
-        is its own folder; we then read in the observations and
-        actions pickles for each episode, which gives us N steps.
-        """
-        for episode in os.listdir(self.__directory):
-            episode_path = os.path.join(self.__directory, episode)
-
-            # Load the observations pickle file
-            observations = []
-            with open(os.path.join(episode_path, "observations.pkl"), "rb") as f:
-                observations = load(f)
-
-            # Actions pickle file
-            actions = []
-            with open(os.path.join(episode_path, "actions.pkl"), "rb") as f:
-                actions = load(f)
-
-            # The rewards is calculable as we know its a successful episode,
-            # which uses a sparse reward of 1.0 on success
-            rewards = [
-                1.0 / self.__gamma ** (len(observations) - i - 1)
-                for i in range(len(observations))
-            ]
-
-            for i in range(len(observations)):
-                self.__steps.append((observations[i], actions[i], rewards[i]))
-
-    def __len__(self) -> int:
-        return len(self.__steps)
 
 
 class Trainer(ABC):
@@ -80,6 +29,7 @@ class Trainer(ABC):
         epochs: int = 50,
         episode_length_limit: int = 1000,
         checkpoints_folder: str = "checkpoints",
+        validation_dataset: Optional[Dataset] = None,
     ):
         super().__init__()
 
@@ -93,6 +43,7 @@ class Trainer(ABC):
         self.episode_length_limit = episode_length_limit
         self.epochs = epochs
         self.__current_epoch = 0
+        self.__validation_dataset = validation_dataset
 
         if not os.path.exists(self.checkpoints_folder):
             os.makedirs(self.checkpoints_folder)
@@ -108,6 +59,10 @@ class Trainer(ABC):
         self.__dataset_loader = DataLoader(
             self.dataset, batch_size=self.batch_size, shuffle=True
         )
+        if self.__validation_dataset is not None:
+            self.__validation_loader = DataLoader(
+                self.__validation_dataset, batch_size=self.batch_size, shuffle=False
+            )
 
     def __print_status(self):
         pass
@@ -120,23 +75,24 @@ class Trainer(ABC):
         save will save the model, stats around progress, and any additional
         data to the checkpoints folder
         """
-        save_file: Dict[str, Any] = {
-            "current_epoch": self.__current_epoch,
-            "rewards": self.rewards,
-            "losses": self.losses,
-        }
+        # save_file: Dict[str, Any] = {
+        #     "current_epoch": self.__current_epoch,
+        #     "rewards": self.rewards,
+        #     "losses": self.losses,
+        # }
 
         # Save the save_file to a pickle
-        with open(
-            os.path.join(self.checkpoints_folder, f"{checkpoint_name}.pkl"), "wb"
-        ) as f:
-            dump(save_file, f)
+        # with open(
+        #     os.path.join(self.checkpoints_folder, f"{checkpoint_name}.pkl"), "wb"
+        # ) as f:
+        #     dump(save_file, f)
 
         # Save the model
-        torch.save(
-            self.model.state_dict(),
-            os.path.join(self.checkpoints_folder, f"{checkpoint_name}.pth"),
-        )
+        # torch.save(
+        #     self.model.state_dict(),
+        #     os.path.join(self.checkpoints_folder, f"{checkpoint_name}.pth"),
+        # )
+        self.model.save(os.path.join(self.checkpoints_folder, f"{checkpoint_name}.pth"))
 
     def load(self, checkpoint_name: str):
         """
@@ -166,15 +122,15 @@ class Trainer(ABC):
         observation, _ = self.env.reset()
 
         for step in range(self.episode_length_limit):
-            action = self.model(observation)
-            observation, reward, terminated, _ = self.env.step(action)
+            action = self.get_action_from_model(observation["observation"])
+            observation, reward, terminated, _, _ = self.env.step(action)
 
             if terminated:
                 break
 
         return reward, step
 
-    def test_model_performance(self, runs: int = 100) -> Tuple[float, int, int, int]:
+    def test_model_performance(self, runs: int = 1) -> Tuple[float, int, int, int]:
         """
         test_model_performance will run the model for a number of episodes and
         return the average reward and the number of successful episodes, and
@@ -198,16 +154,6 @@ class Trainer(ABC):
 
         return avg_reward, successes, avg_steps, avg_steps_per_success
 
-    @abstractmethod
-    def training_step(
-        self, observations: Tensor, actions: Tensor, rewards: Tensor
-    ) -> float:
-        """
-        training_step is a single step of the training loop. It will take in a batch
-        of observations, actions, and rewards, and return the loss for the batch
-        """
-        pass
-
     def train(self):
         """
         train is our primary training loop. If our trainer has been loaded from
@@ -219,22 +165,59 @@ class Trainer(ABC):
         then test performance of the model across a number of episodes.
         """
 
-        while self.__current_epoch <= self.epochs:
+        while self.__current_epoch < self.epochs:
             batch = 0
             self.__current_epoch += 1
 
+            batch_losses = []
             for observations, actions, rewards in self.__dataset_loader:
+                observations = observations.float()
+                actions = actions.float()
+                rewards = rewards.float()
+
                 batch += 1
+                loss = 0.0
                 self.__current_action = f"Training epoch {self.__current_epoch}/{self.epochs} - Batch {batch}/{len(self.dataset)%self.batch_size}"
+                # print(f"EPOCH: {self.__current_epoch} - BATCH: {batch+1} - LOSS: {loss}", end="\r")
                 self.__print_status()
 
                 # Perform a training step
                 loss = self.training_step(
                     Tensor(observations), Tensor(actions), Tensor(rewards)
                 )
+                batch_losses.append(loss.item())
+                print(
+                    f"Epoch {self.__current_epoch}/{self.epochs} - Batch {batch}/{int(len(self.dataset)/self.batch_size)} - Loss: {loss.item()} - Batch Loss Avg: {sum(batch_losses)/len(batch_losses)}",
+                    end="\r",
+                )
+                self.losses.append(loss)
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+            print()
+            print(
+                f"Average batch loss for epoch: {sum(batch_losses)/len(batch_losses)}"
+            )
 
             # Validation - perform 100 episodes and observe performance of model
-            rewards, successes, steps, success_steps = self.test_model_performance()
+            # rewards, successes, steps, success_steps = self.test_model_performance()
+            if self.__validation_dataset is not None:
+                validation_losses = []
+                with torch.no_grad():
+                    for observations, actions, rewards in self.__validation_loader:
+                        observations = observations.float()
+                        actions = actions.float()
+                        rewards = rewards.float()
+
+                        loss = self.training_step(
+                            Tensor(observations), Tensor(actions), Tensor(rewards)
+                        )
+                        validation_losses.append(loss.item())
+                    print()
+                    print(
+                        f"Validation Loss Average: {sum(validation_losses)/len(validation_losses)}"
+                    )
 
             self.__current_action = "Saving"
             self.__print_status()
@@ -242,3 +225,72 @@ class Trainer(ABC):
 
         print("")
         print("Training complete!")
+
+    @abstractmethod
+    def training_step(
+        self, observations: Tensor, actions: Tensor, rewards: Tensor
+    ) -> Tensor:
+        """
+        training_step is a single step of the training loop. It will take in a batch
+        of observations, actions, and rewards, and return the loss for the batch
+        """
+        pass
+
+    @abstractmethod
+    def get_action_from_model(self, observation: np.ndarray) -> np.ndarray:
+        """
+        get_action_from_model will take in an observation and return the action
+        predicted by the model
+        """
+        pass
+
+
+class BehavioralCloningTrainer(Trainer):
+
+    def training_step(
+        self, observations: Tensor, actions: Tensor, rewards: Tensor
+    ) -> Tensor:
+        """
+        training_step is a single step of the training loop. It will take in a batch
+        of observations, actions, and rewards, and return the loss for the batch
+        """
+        predictions = self.model(observations)
+        loss = self.loss(predictions, actions)
+        return loss
+
+    def get_action_from_model(self, observation: np.ndarray) -> np.ndarray:
+        """
+        get_action_from_model will take in an observation and return the action
+        predicted by the model
+        """
+        observation_tensor = torch.tensor(observation, dtype=torch.float32)
+        action_raw = self.model(observation_tensor).detach().numpy()
+        action_onehot = np.zeros_like(action_raw)
+        action_onehot[np.argmax(action_raw)] = 1
+
+        return Action.FromOneHot(action_onehot)
+
+
+class QLearningTrainer(Trainer):
+
+    def training_step(
+        self, observations: Tensor, actions: Tensor, rewards: Tensor
+    ) -> Tensor:
+        """
+        training_step is a single step of the training loop. It will take in a batch
+        of observations, actions, and rewards, and return the loss for the batch
+        """
+        # Our input consists of the 18 observation dimensions and the 12 action
+        # dimensions one-hot represented, making a 30 dimensional input vector
+        input = torch.cat([observations, actions], dim=1)
+
+        predictions = self.model(input)
+        loss = self.loss(predictions, rewards)
+        return loss
+
+    def get_action_from_model(self, observation: np.ndarray) -> np.ndarray:
+        """
+        get_action_from_model will take in an observation and return the action
+        predicted by the model
+        """
+        return self.model.get_actions(observation)[0].one_hot()
