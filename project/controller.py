@@ -8,7 +8,7 @@ import pygame
 
 from threading import Lock, Thread
 
-from time import sleep
+from time import sleep, time
 
 
 class KeyboardController:
@@ -104,6 +104,13 @@ class GamePad:
             "close": False,
         }
 
+        # __last_known_finger_state will track the finger opening
+        # or closing as a binary state, and will disallow repeated
+        # opening or closing commands to be sent. False is open,
+        # True is closed. We say the fingers are closed at the init
+        # of the simulation
+        self.__last_known_finger_state = False
+
         self.__lock = Lock()
 
         self.__thread = Thread(target=self.__get_joystick)
@@ -127,9 +134,15 @@ class GamePad:
             elif self.state["lower"]:
                 return Action(Action.DOWN)
             elif self.state["open"]:
-                return Action(Action.OPEN_GRIPPER)
+                if not self.__last_known_finger_state:
+                    self.__last_known_finger_state = True
+                    return Action(Action.OPEN_GRIPPER)
+                # return Action(Action.OPEN_GRIPPER)
             elif self.state["close"]:
-                return Action(Action.CLOSE_GRIPPER)
+                if self.__last_known_finger_state:
+                    self.__last_known_finger_state = False
+                    return Action(Action.CLOSE_GRIPPER)
+                # return Action(Action.CLOSE_GRIPPER)
             elif self.state["movement"][0] != 0 or self.state["movement"][1] != 0:
                 if (
                     self.state["movement"][0] == 1.0
@@ -161,6 +174,30 @@ class GamePad:
                     return Action(Action.SOUTH)
 
         return None
+
+    def kill_episode_button(self) -> bool:
+        """
+        There exists a special button that, if pressed, will kill the episode.
+        For our Xbox controller it's the X button.
+        """
+        with self.__lock:
+            kill = self.__joystick.get_button(3)
+        if kill:
+            self.reset()
+            sleep(0.1)
+            return True
+
+    def reset(self):
+        """
+        reset will reset the controller to its initial state
+        """
+        with self.__lock:
+            self.state["movement"] = [0.0, 0.0]
+            self.state["raise"] = False
+            self.state["lower"] = False
+            self.state["open"] = False
+            self.state["close"] = False
+            self.__last_known_finger_state = False
 
     def __keep_alive(self):
         """
