@@ -49,7 +49,7 @@ class Recorder:
             env.sim.render_mode = old_render_mode
             self.__images.append(img)
 
-    def save(self) -> None:
+    def save(self, success: bool) -> None:
         """
         Saves the recorded data to disk
         """
@@ -63,6 +63,11 @@ class Recorder:
 
         with open(os.path.join(self.__target_directory, "actions.pkl"), "wb") as f:
             dump(self.__actions, f)
+
+        # If the mission is a success, make a blank file called success
+        if success:
+            with open(os.path.join(self.__target_directory, "success"), "w") as f:
+                pass
 
         if self.__save_images:
             for i, image in enumerate(self.__images):
