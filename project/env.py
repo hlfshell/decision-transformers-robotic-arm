@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import math
-from math import pi
 from random import choice, uniform
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, List, Tuple
 
 import numpy as np
 from panda_gym.envs.core import RobotTaskEnv, Task
@@ -420,6 +418,23 @@ class Action:
 
     def __init__(self, action: int):
         self.action = action
+
+    @classmethod
+    def all(cls) -> List[Action]:
+        return [
+            Action(Action.NORTH),
+            Action(Action.NORTHEAST),
+            Action(Action.EAST),
+            Action(Action.SOUTHEAST),
+            Action(Action.SOUTH),
+            Action(Action.SOUTHWEST),
+            Action(Action.WEST),
+            Action(Action.NORTHWEST),
+            Action(Action.UP),
+            Action(Action.DOWN),
+            Action(Action.OPEN_GRIPPER),
+            Action(Action.CLOSE_GRIPPER),
+        ]
 
     @classmethod
     def Random(cls) -> Action:
