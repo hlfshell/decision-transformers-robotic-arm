@@ -24,9 +24,11 @@ class Trainer(ABC):
         model: torch.nn.Module,
         dataset: Dataset,
         gamma: float = 0.95,
-        alpha: float = 1e-3,
+        learning_rate: float = 1e-3,
+        learning_warmup_steps: Optional[float] = None,
         batch_size: int = 128,
         epochs: int = 50,
+        weight_decay: Optional[float] = None,
         episode_length_limit: int = 1000,
         checkpoints_folder: str = "checkpoints",
         validation_dataset: Optional[Dataset] = None,
@@ -37,7 +39,7 @@ class Trainer(ABC):
         self.model = model
         self.dataset = dataset
         self.gamma = gamma
-        self.alpha = alpha
+        self.alpha = learning_rate
         self.batch_size = batch_size
         self.checkpoints_folder = checkpoints_folder
         self.episode_length_limit = episode_length_limit
@@ -49,7 +51,20 @@ class Trainer(ABC):
             os.makedirs(self.checkpoints_folder)
 
         self.loss = MSELoss()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.alpha)
+        self.__weight_decay = weight_decay
+        if self.__weight_decay is not None:
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(), lr=self.alpha, weight_decay=self.__weight_decay
+            )
+        else:
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.alpha)
+
+        self.__learning_warmup_steps = learning_warmup_steps
+        if self.__learning_warmup_steps is not None:
+            self.scheduler = torch.optim.lr_scheduler.LambdaLR(
+                self.optimizer,
+                lambda steps: min((self.__learning_warmup_steps + 1) / 1, 1),
+            )
 
         self.rewards: List[List[float]] = []
         self.losses: List[float] = []
@@ -225,6 +240,9 @@ class Trainer(ABC):
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+
+                if self.scheduler is not None:
+                    self.scheduler.step()
 
             if sum(batch_losses) / len(batch_losses) < lowest_training_loss:
                 lowest_training_loss = sum(batch_losses) / len(batch_losses)
