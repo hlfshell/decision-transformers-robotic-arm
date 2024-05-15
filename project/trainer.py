@@ -42,7 +42,7 @@ class Trainer(ABC):
         self.checkpoints_folder = checkpoints_folder
         self.episode_length_limit = episode_length_limit
         self.epochs = epochs
-        self.__current_epoch = 0
+        self.current_epoch = 0
         self.__validation_dataset = validation_dataset
 
         if not os.path.exists(self.checkpoints_folder):
@@ -63,6 +63,32 @@ class Trainer(ABC):
             self.__validation_loader = DataLoader(
                 self.__validation_dataset, batch_size=self.batch_size, shuffle=False
             )
+
+    def start_from(self, epoch: int = -1):
+        """
+        start_from loads the model from a specific epoch checkpoint. If it is not
+        specified (ie < 0), it will load the most recent checkpoint
+        """
+        if epoch < 0:
+            files = os.listdir(self.checkpoints_folder)
+            if len(files) == 0:
+                # Do nothing, as there are no checkpoints
+                return
+            highest_epoch = 0
+            files = [f for f in files if f.endswith(".pth")]
+            # isolate the # in the format epoch_#.pth.pth
+            for f in files:
+                current_epoch = int(f.split("_")[1].split(".")[0])
+                highest_epoch = max(highest_epoch, current_epoch)
+
+            epoch = highest_epoch
+
+        # We immediately increment the epoch by 1, as we are starting from the
+        # current epoch, not the next.
+        self.current_epoch = epoch
+
+        model_location = f"{self.checkpoints_folder}/epoch_{epoch}.pth.pth"
+        self.model.load(model_location)
 
     def __print_status(self):
         pass
@@ -105,7 +131,7 @@ class Trainer(ABC):
         ) as f:
             save_file = load(f)
 
-        self.__current_epoch = save_file["current_epoch"]
+        self.current_epoch = save_file["current_epoch"]
         self.rewards = save_file["rewards"]
         self.losses = save_file["losses"]
 
@@ -164,10 +190,15 @@ class Trainer(ABC):
         At the end of each epoch, we will save the model to the checkpoints folder,
         then test performance of the model across a number of episodes.
         """
+        lowest_training_loss_epoch = 0
+        lowest_training_loss = float("inf")
+        lowest_validation_loss_epoch = 0
+        lowest_validation_loss = float("inf")
 
-        while self.__current_epoch < self.epochs:
+        while self.current_epoch < self.epochs:
             batch = 0
-            self.__current_epoch += 1
+            self.current_epoch += 1
+            self.model.train()
 
             batch_losses = []
             for observations, actions, rewards in self.__dataset_loader:
@@ -177,7 +208,7 @@ class Trainer(ABC):
 
                 batch += 1
                 loss = 0.0
-                self.__current_action = f"Training epoch {self.__current_epoch}/{self.epochs} - Batch {batch}/{len(self.dataset)%self.batch_size}"
+                self.__current_action = f"Training epoch {self.current_epoch}/{self.epochs} - Batch {batch}/{len(self.dataset)%self.batch_size}"
                 # print(f"EPOCH: {self.__current_epoch} - BATCH: {batch+1} - LOSS: {loss}", end="\r")
                 self.__print_status()
 
@@ -187,13 +218,17 @@ class Trainer(ABC):
                 )
                 batch_losses.append(loss.item())
                 print(
-                    f"Epoch {self.__current_epoch}/{self.epochs} - Batch {batch}/{int(len(self.dataset)/self.batch_size)} - Loss: {loss.item()} - Batch Loss Avg: {sum(batch_losses)/len(batch_losses)}",
+                    f"Epoch {self.current_epoch}/{self.epochs} - Batch {batch}/{int(len(self.dataset)/self.batch_size)} - Loss: {loss.item():.5f} - Batch Loss Avg: {sum(batch_losses)/len(batch_losses):.5f}",
                     end="\r",
                 )
-                self.losses.append(loss)
+                # self.losses.append(loss)
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+
+            if sum(batch_losses) / len(batch_losses) < lowest_training_loss:
+                lowest_training_loss = sum(batch_losses) / len(batch_losses)
+                lowest_training_loss_epoch = self.current_epoch
 
             print()
             print(
@@ -205,6 +240,7 @@ class Trainer(ABC):
             if self.__validation_dataset is not None:
                 validation_losses = []
                 with torch.no_grad():
+                    self.model.eval()
                     for observations, actions, rewards in self.__validation_loader:
                         observations = observations.float()
                         actions = actions.float()
@@ -219,12 +255,28 @@ class Trainer(ABC):
                         f"Validation Loss Average: {sum(validation_losses)/len(validation_losses)}"
                     )
 
+                if (
+                    sum(validation_losses) / len(validation_losses)
+                    < lowest_validation_loss
+                ):
+                    lowest_validation_loss = sum(validation_losses) / len(
+                        validation_losses
+                    )
+                    lowest_validation_loss_epoch = self.current_epoch
+
             self.__current_action = "Saving"
             self.__print_status()
-            self.save(f"epoch_{self.__current_epoch}.pth")
+            self.save(f"epoch_{self.current_epoch}.pth")
 
         print("")
         print("Training complete!")
+        print(
+            f"Lowest Training Loss: {lowest_training_loss:.5f} at epoch {lowest_training_loss_epoch}"
+        )
+        if self.__validation_dataset is not None:
+            print(
+                f"Lowest Validation Loss: {lowest_validation_loss:.5f} at epoch {lowest_validation_loss_epoch}"
+            )
 
     @abstractmethod
     def training_step(
@@ -285,7 +337,7 @@ class QLearningTrainer(Trainer):
         input = torch.cat([observations, actions], dim=1)
 
         predictions = self.model(input)
-        loss = self.loss(predictions, rewards)
+        loss = self.loss(predictions, rewards.unsqueeze(1))
         return loss
 
     def get_action_from_model(self, observation: np.ndarray) -> np.ndarray:
