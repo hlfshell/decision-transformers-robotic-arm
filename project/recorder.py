@@ -84,6 +84,7 @@ class Recorder:
                 loop=0,
             )
 
+    @classmethod
     def Load(cls, filepath: str) -> Tuple[List[np.ndarray], List[Action]]:
         """
         Load from the disk the observations and actions as would have been
