@@ -53,8 +53,8 @@ def record_episode(env: SortEnv, recorder: Recorder, run_id: int) -> bool:
             sleep(1 / FPS)
             continue
 
-        observation, reward, terminated, _, _ = env.step(action)
         recorder.record(step, observation, action, env)
+        observation, reward, terminated, _, _ = env.step(action)
 
         if terminated:
             print("Saving")
