@@ -23,7 +23,10 @@ trainer = BehavioralCloningTrainer(
     dataset,
     validation_dataset=validation,
     epochs=5_000,
-    alpha=1e-4,
+    batch_size=64,
+    learning_rate=1e-4,
+    learning_warmup_steps=10e5,
+    weight_decay=1e-4,
 )
 trainer.start_from()
 trainer.train()
