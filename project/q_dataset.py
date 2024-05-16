@@ -46,12 +46,22 @@ class QDataset(RobotDataset):
 
     def generate_steps(self):
         self.__generated_steps = []
+        successful = 0
+        timeout = 0
+        early_termination = 0
 
         while len(self.__generated_steps) < self.steps_per_epoch:
             data = self.rollout()
+            if data[-1][2] > 0:
+                successful += 1
+            elif len(data) >= self.max_steps_per_episode:
+                timeout += 1
+            else:
+                early_termination += 1
+
             self.__generated_steps.extend(data)
             print(
-                f"Generating steps: {len(self.__generated_steps)}/{self.steps_per_epoch}",
+                f"Generating steps: {len(self.__generated_steps)}/{self.steps_per_epoch} - Successful: {successful} Timeout: {timeout} Early Termination: {early_termination}",
                 end="\r",
             )
         print()
