@@ -31,7 +31,7 @@ class RobotDataset(Dataset):
         """
         self.__directory = directory
         self.__transforms = transforms
-        self.__gamma = gamma
+        self.gamma = gamma
         self.__success_only = success_only
 
         # Quickly load and scan through the episodes to load them
@@ -42,14 +42,14 @@ class RobotDataset(Dataset):
         self.__episodes: Dict[int, Tuple[int, int]] = {}
         # __steps is every step in the dataset, which is a tuple of
         # observation, action, and reward
-        self.__steps: List[Tuple[np.ndarray, Action, float]] = []
+        self._steps: List[Tuple[np.ndarray, Action, float]] = []
 
         if episodes is None:
             self.load_dataset()
         else:
             for episode_id, observations, actions, rewards in episodes:
                 for i in range(len(observations)):
-                    self.__steps.append((observations[i], actions[i], rewards[i]))
+                    self._steps.append((observations[i], actions[i], rewards[i]))
                 self.__episodes[episode_id] = (
                     len(observations),
                     1 if rewards[-1] > 0 else 0,
@@ -95,14 +95,14 @@ class RobotDataset(Dataset):
                 rewards = [0] * len(observations)
                 rewards[-1] = 1.0
                 for i in range(len(observations) - 2, 0, -1):
-                    rewards[i] = rewards[i + 1] * self.__gamma
+                    rewards[i] = rewards[i + 1] * self.gamma
             else:
                 rewards = [0] * len(observations)
 
             self.__episodes[episode_id] = (len(observations), 1 if success else 0)
 
             for i in range(len(observations)):
-                self.__steps.append((observations[i], actions[i], rewards[i]))
+                self._steps.append((observations[i], actions[i], rewards[i]))
 
     def split(self, percentage: float) -> Tuple[RobotDataset, RobotDataset]:
         """
@@ -115,7 +115,7 @@ class RobotDataset(Dataset):
         but episodes are not split - thus the split is determine first by
         episode assignment, and then steps.
         """
-        total_steps = int(len(self.__steps) * percentage)
+        total_steps = int(len(self._steps) * percentage)
 
         target_episodes = []
         target_steps = 0
@@ -149,9 +149,9 @@ class RobotDataset(Dataset):
             end_index = start_index + episode_steps
 
             for i in range(start_index, end_index):
-                observations.append(self.__steps[i][0])
-                actions.append(self.__steps[i][1])
-                rewards.append(self.__steps[i][2])
+                observations.append(self._steps[i][0])
+                actions.append(self._steps[i][1])
+                rewards.append(self._steps[i][2])
 
             if episode_id in target_episodes:
                 episodes_target.append((episode_id, observations, actions, rewards))
@@ -162,7 +162,7 @@ class RobotDataset(Dataset):
         dataset_a = RobotDataset(
             self.__directory,
             self.__transforms,
-            self.__gamma,
+            self.gamma,
             self.__success_only,
             episodes=episodes_target,
         )
@@ -170,7 +170,7 @@ class RobotDataset(Dataset):
         dataset_b = RobotDataset(
             self.__directory,
             self.__transforms,
-            self.__gamma,
+            self.gamma,
             self.__success_only,
             episodes=episodes_other,
         )
@@ -178,10 +178,10 @@ class RobotDataset(Dataset):
         return dataset_a, dataset_b
 
     def __len__(self) -> int:
-        return len(self.__steps)
+        return len(self._steps)
 
     def __getitem__(self, idx: int) -> Tuple[np.ndarray, Action, float]:
-        return self.__steps[idx]
+        return self._steps[idx]
 
     def info(self) -> str:
         """
@@ -194,10 +194,10 @@ class RobotDataset(Dataset):
 
         return f"""
 Dataset Info:
-- {len(self.__steps)} steps
+- {len(self._steps)} steps
 - {len(self.__episodes)} episodes
 - {len(successful_episodes)} successful episodes
 - {len(self.__episodes) - len(successful_episodes)} failed episodes
-Average steps per episode: {len(self.__steps) / len(self.__episodes):.1f}
+Average steps per episode: {len(self._steps) / len(self.__episodes):.1f}
 Average steps per successful episode: {successful_episode_steps / len(successful_episodes):.1f}
         """
