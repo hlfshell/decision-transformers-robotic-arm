@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from abc import ABC, abstractmethod
 from pickle import load
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,6 +32,7 @@ class Trainer(ABC):
         episode_length_limit: int = 1000,
         checkpoints_folder: str = "checkpoints",
         validation_dataset: Optional[Dataset] = None,
+        on_epoch_start: Callable = None,
     ):
         super().__init__()
 
@@ -46,6 +47,7 @@ class Trainer(ABC):
         self.epochs = epochs
         self.current_epoch = 0
         self.__validation_dataset = validation_dataset
+        self.__on_epoch_start = on_epoch_start
 
         if not os.path.exists(self.checkpoints_folder):
             os.makedirs(self.checkpoints_folder)
@@ -65,6 +67,8 @@ class Trainer(ABC):
                 self.optimizer,
                 lambda steps: min((self.__learning_warmup_steps + 1) / 1, 1),
             )
+        else:
+            self.scheduler = None
 
         self.rewards: List[List[float]] = []
         self.losses: List[float] = []
@@ -211,6 +215,9 @@ class Trainer(ABC):
         lowest_validation_loss = float("inf")
 
         while self.current_epoch < self.epochs:
+            if self.__on_epoch_start is not None:
+                self.__on_epoch_start()
+
             batch = 0
             self.current_epoch += 1
             self.model.train()
